@@ -1,6 +1,6 @@
 # ClassTrack – Advanced Attendance App  
 
-ClassTrack is a modern attendance management app designed for teachers. It works as a **Progressive Web App (PWA)** on iOS and as a **native Android app** (via Capacitor/TWA).  
+ClassTrack is a modern management app. It works as a **Progressive Web App (PWA)** on iOS and as a **native Android app** (via Capacitor/TWA).  
 
 ## ✨ Features (MVP)  
 - One-time **teacher registration** (stored locally).  
