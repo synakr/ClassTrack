@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Attendance App</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+</head>
+<body class="bg-gray-100 p-6">
+  <div class="max-w-xl mx-auto bg-white shadow-lg rounded-lg p-6">
+    <h1 class="text-2xl font-bold mb-4">Attendance App</h1>
+
+    <!-- Registration -->
+    <div id="registration">
+      <h2 class="text-lg mb-2">Faculty Registration</h2>
+      <input id="teacherName" type="text" placeholder="Enter Name" class="border p-2 w-full mb-2 rounded">
+      <button onclick="register()" class="bg-blue-500 text-white px-4 py-2 rounded">Register</button>
+    </div>
+
+    <!-- Main App -->
+    <div id="main" class="hidden">
+      <p class="mb-4">Welcome, <span id="teacherDisplay"></span></p>
+      <h2 class="text-lg mb-2">Create Class</h2>
+      <input id="className" type="text" placeholder="Class Name" class="border p-2 w-full mb-2 rounded">
+      <button onclick="createClass()" class="bg-green-500 text-white px-4 py-2 rounded">Add Class</button>
+      
+      <h2 class="text-lg mt-4 mb-2">Your Classes</h2>
+      <ul id="classList" class="list-disc pl-5"></ul>
+    </div>
+
+    <!-- Class Page -->
+    <div id="classPage" class="hidden">
+      <h2 class="text-lg font-bold mb-2" id="classTitle"></h2>
+      <input type="file" id="excelInput" accept=".xlsx,.xls" class="mb-2">
+      <button onclick="loadExcel()" class="bg-purple-500 text-white px-4 py-2 rounded">Upload Excel</button>
+      <div id="attendanceArea" class="mt-4"></div>
+    </div>
+  </div>
+
+  <script>
+    let teacher = localStorage.getItem("teacher");
+    let classes = JSON.parse(localStorage.getItem("classes") || "[]");
+    let students = [];
+    let currentClass = "";
+    let index = 0;
+
+    // Init
+    if (teacher) {
+      let teacher = JSON.parse(localStorage.getItem("teacher") || "null");
+      if (teacher) {
+      document.getElementById("registration").classList.add("hidden");
+      document.getElementById("main").classList.remove("hidden");
+      document.getElementById("teacherDisplay").innerText = teacher.name;
+      renderClasses();
+      }
+
+    }
+
+    function register() {
+  let name = document.getElementById("teacherName").value;
+  let email = prompt("Enter your email (optional):"); // can skip if not needed
+  if (!name) return alert("Enter your name");
+
+  let teacherObj = { name, email };
+  localStorage.setItem("teacher", JSON.stringify(teacherObj));
+  location.reload();
+}
+
+
+    function createClass() {
+  let c = document.getElementById("className").value;
+  if (!c) return alert("Enter class name");
+  classes.push({ name: c });
+  localStorage.setItem("classes", JSON.stringify(classes));
+  renderClasses();
+}
+
+
+    function renderClasses() {
+  let list = document.getElementById("classList");
+  list.innerHTML = "";
+  classes.forEach(c => {
+    let li = document.createElement("li");
+    li.innerHTML = `<button class="text-blue-600" onclick="openClass('${c.name}')">${c.name}</button>`;
+    list.appendChild(li);
+  });
+}
+
+
+    function openClass(c) {
+      currentClass = c;
+      document.getElementById("main").classList.add("hidden");
+      document.getElementById("classPage").classList.remove("hidden");
+      document.getElementById("classTitle").innerText = c;
+    }
+
+    function loadExcel() {
+      let file = document.getElementById("excelInput").files[0];
+      if (!file) return alert("Upload a file");
+      let reader = new FileReader();
+      reader.onload = function(e) {
+        let data = new Uint8Array(e.target.result);
+        let workbook = XLSX.read(data, {type: "array"});
+        let sheet = workbook.Sheets[workbook.SheetNames[0]];
+        let raw = XLSX.utils.sheet_to_json(sheet);
+
+        // Normalize keys
+        students = raw.map(row => ({
+          Name: row["Name"] || row["name"] || "",
+          Enrollment: row["Enrollment"] || row["enrollment"] || "",
+          Registration: row["Registration"] || row["registration"] || "",
+          Status: ""
+        }));
+
+        startAttendance();
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function startAttendance() {
+      index = 0;
+      showStudent();
+    }
+
+    function showStudent() {
+      let area = document.getElementById("attendanceArea");
+      if (index >= students.length) {
+        area.innerHTML = `
+          <p class='text-green-600 font-bold mb-2'>Attendance Completed!</p>
+          <button onclick="downloadAttendance()" class="bg-blue-600 text-white px-4 py-2 rounded">Download Attendance</button>
+        `;
+        return;
+      }
+      let s = students[index];
+      area.innerHTML = `
+        <div class="p-4 border rounded shadow">
+          <p><b>Name:</b> ${s.Name}</p>
+          <p><b>Enrollment:</b> ${s.Enrollment}</p>
+          <p><b>Registration:</b> ${s.Registration}</p>
+          <div class="mt-2 flex gap-2">
+            <button onclick="markPresent()" class="bg-green-500 text-white px-4 py-2 rounded">Present</button>
+            <button onclick="markAbsent()" class="bg-red-500 text-white px-4 py-2 rounded">Absent</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function markPresent() {
+      students[index].Status = "Present";
+      index++;
+      showStudent();
+    }
+
+    function markAbsent() {
+      students[index].Status = "Absent";
+      index++;
+      showStudent();
+    }
+
+    function downloadAttendance() {
+      let today = new Date().toLocaleDateString();
+      let wsData = [
+        ["Teacher", teacher],
+        ["Class", currentClass],
+        ["Date", today],
+        [],
+        ["Name", "Enrollment", "Registration", "Status"]
+      ];
+      students.forEach(s => {
+        wsData.push([s.Name, s.Enrollment, s.Registration, s.Status]);
+      });
+      let ws = XLSX.utils.aoa_to_sheet(wsData);
+      let wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Attendance");
+      XLSX.writeFile(wb, `${currentClass}_attendance_${today}.xlsx`);
+    }
+  </script>
+</body>
+</html>
