@@ -3,177 +3,354 @@
 <head>
   <meta charset="UTF-8">
   <title>Attendance App</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#2563eb">
+  <link rel="apple-touch-icon" href="icon-192.png">
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 </head>
-<body class="bg-gray-100 p-6">
-  <div class="max-w-xl mx-auto bg-white shadow-lg rounded-lg p-6">
-    <h1 class="text-2xl font-bold mb-4">Attendance App</h1>
+<body class="bg-gray-100 p-2">
+  <div class="max-w-2xl mx-auto bg-white shadow-lg rounded-lg p-4">
+    <!-- Navigation Bar -->
+    <nav class="flex justify-between items-center mb-4">
+      <span class="font-bold text-xl text-blue-700">Attendance App</span>
+      <div id="navActions" class="space-x-2">
+        <button id="logoutBtn" class="bg-red-500 text-white px-3 py-1 rounded hidden">Logout</button>
+        <button id="backBtn" class="bg-gray-300 text-gray-700 px-3 py-1 rounded hidden">Back</button>
+      </div>
+    </nav>
+
+    <!-- Feedback Message -->
+    <div id="messageBox" class="mb-2 text-center text-sm"></div>
 
     <!-- Registration -->
     <div id="registration">
       <h2 class="text-lg mb-2">Faculty Registration</h2>
       <input id="teacherName" type="text" placeholder="Enter Name" class="border p-2 w-full mb-2 rounded">
-      <button onclick="register()" class="bg-blue-500 text-white px-4 py-2 rounded">Register</button>
+      <input id="teacherEmail" type="email" placeholder="Enter Email (optional)" class="border p-2 w-full mb-2 rounded">
+      <button id="registerBtn" class="bg-blue-500 text-white px-4 py-2 rounded w-full">Register</button>
     </div>
 
     <!-- Main App -->
     <div id="main" class="hidden">
       <p class="mb-4">Welcome, <span id="teacherDisplay"></span></p>
       <h2 class="text-lg mb-2">Create Class</h2>
-      <input id="className" type="text" placeholder="Class Name" class="border p-2 w-full mb-2 rounded">
-      <button onclick="createClass()" class="bg-green-500 text-white px-4 py-2 rounded">Add Class</button>
-      
+      <div class="flex gap-2 mb-2">
+        <input id="className" type="text" placeholder="Class Name" class="border p-2 flex-1 rounded">
+        <button id="createClassBtn" class="bg-green-500 text-white px-4 py-2 rounded">Add</button>
+      </div>
       <h2 class="text-lg mt-4 mb-2">Your Classes</h2>
       <ul id="classList" class="list-disc pl-5"></ul>
     </div>
 
     <!-- Class Page -->
     <div id="classPage" class="hidden">
-      <h2 class="text-lg font-bold mb-2" id="classTitle"></h2>
+      <div class="flex justify-between items-center mb-2">
+        <h2 class="text-lg font-bold" id="classTitle"></h2>
+        <button id="deleteClassBtn" class="bg-red-400 text-white px-3 py-1 rounded">Delete Class</button>
+      </div>
       <input type="file" id="excelInput" accept=".xlsx,.xls" class="mb-2">
-      <button onclick="loadExcel()" class="bg-purple-500 text-white px-4 py-2 rounded">Upload Excel</button>
+      <button id="uploadExcelBtn" class="bg-purple-500 text-white px-4 py-2 rounded">Upload Excel</button>
       <div id="attendanceArea" class="mt-4"></div>
     </div>
   </div>
 
   <script>
-    let teacher = localStorage.getItem("teacher");
-    let classes = JSON.parse(localStorage.getItem("classes") || "[]");
+    // Register service worker for PWA
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('service-worker.js').then(function(reg) {
+          // Registration successful
+        }, function(err) {
+          // Registration failed
+        });
+      });
+    }
+
+    // State
+    let teacher = null;
+    let classes = [];
     let students = [];
     let currentClass = "";
     let index = 0;
+    let attendanceSaved = {};
 
-    // Init
-    if (teacher) {
-      let teacher = JSON.parse(localStorage.getItem("teacher") || "null");
-      if (teacher) {
-      document.getElementById("registration").classList.add("hidden");
-      document.getElementById("main").classList.remove("hidden");
-      document.getElementById("teacherDisplay").innerText = teacher.name;
-      renderClasses();
-      }
+    // DOM Elements
+    const registration = document.getElementById("registration");
+    const main = document.getElementById("main");
+    const classPage = document.getElementById("classPage");
+    const teacherDisplay = document.getElementById("teacherDisplay");
+    const classList = document.getElementById("classList");
+    const classTitle = document.getElementById("classTitle");
+    const attendanceArea = document.getElementById("attendanceArea");
+    const messageBox = document.getElementById("messageBox");
+    const logoutBtn = document.getElementById("logoutBtn");
+    const backBtn = document.getElementById("backBtn");
+    const deleteClassBtn = document.getElementById("deleteClassBtn");
+    const uploadExcelBtn = document.getElementById("uploadExcelBtn");
+    const registerBtn = document.getElementById("registerBtn");
+    const createClassBtn = document.getElementById("createClassBtn");
 
+    // Utility
+    function showMessage(msg, type = "info") {
+      messageBox.textContent = msg;
+      messageBox.className = type === "error" ? "text-red-600" : "text-green-600";
+      setTimeout(() => { messageBox.textContent = ""; }, 2500);
+    }
+    function saveState() {
+      localStorage.setItem("teacher", JSON.stringify(teacher));
+      localStorage.setItem("classes", JSON.stringify(classes));
+      localStorage.setItem("attendanceSaved", JSON.stringify(attendanceSaved));
+    }
+    function loadState() {
+      teacher = JSON.parse(localStorage.getItem("teacher") || "null");
+      classes = JSON.parse(localStorage.getItem("classes") || "[]");
+      attendanceSaved = JSON.parse(localStorage.getItem("attendanceSaved") || "{}");
+    }
+    function resetAttendance() {
+      students = [];
+      index = 0;
+    }
+    function showSection(section) {
+      registration.classList.add("hidden");
+      main.classList.add("hidden");
+      classPage.classList.add("hidden");
+      if (section === "registration") registration.classList.remove("hidden");
+      if (section === "main") main.classList.remove("hidden");
+      if (section === "classPage") classPage.classList.remove("hidden");
+    }
+    function updateNav() {
+      logoutBtn.classList.toggle("hidden", !teacher);
+      backBtn.classList.toggle("hidden", classPage.classList.contains("hidden"));
     }
 
-    function register() {
-  let name = document.getElementById("teacherName").value;
-  let email = prompt("Enter your email (optional):"); // can skip if not needed
-  if (!name) return alert("Enter your name");
+    // Registration
+    registerBtn.onclick = function() {
+      const name = document.getElementById("teacherName").value.trim();
+      const email = document.getElementById("teacherEmail").value.trim();
+      if (!name) return showMessage("Enter your name", "error");
+      teacher = { name, email };
+      saveState();
+      showMessage("Registered successfully!");
+      setTimeout(() => { location.reload(); }, 1200);
+    };
 
-  let teacherObj = { name, email };
-  localStorage.setItem("teacher", JSON.stringify(teacherObj));
-  location.reload();
-}
+    // Logout
+    logoutBtn.onclick = function() {
+      if (confirm("Are you sure you want to logout?")) {
+        localStorage.clear();
+        location.reload();
+      }
+    };
 
+    // Back
+    backBtn.onclick = function() {
+      showSection("main");
+      updateNav();
+      resetAttendance();
+    };
 
-    function createClass() {
-  let c = document.getElementById("className").value;
-  if (!c) return alert("Enter class name");
-  classes.push({ name: c });
-  localStorage.setItem("classes", JSON.stringify(classes));
-  renderClasses();
-}
+    // Create Class
+    createClassBtn.onclick = function() {
+      const c = document.getElementById("className").value.trim();
+      if (!c) return showMessage("Enter class name", "error");
+      if (classes.some(cls => cls.name === c)) return showMessage("Class already exists", "error");
+      classes.push({ name: c });
+      saveState();
+      renderClasses();
+      showMessage("Class added!");
+      document.getElementById("className").value = "";
+    };
 
-
+    // Render Classes
     function renderClasses() {
-  let list = document.getElementById("classList");
-  list.innerHTML = "";
-  classes.forEach(c => {
-    let li = document.createElement("li");
-    li.innerHTML = `<button class="text-blue-600" onclick="openClass('${c.name}')">${c.name}</button>`;
-    list.appendChild(li);
-  });
-}
+      classList.innerHTML = "";
+      if (classes.length === 0) {
+        classList.innerHTML = '<li class="text-gray-500">No classes yet.</li>';
+        return;
+      }
+      classes.forEach(c => {
+        const li = document.createElement("li");
+        li.className = "mb-1";
+        li.innerHTML = `<button class="text-blue-600 underline" data-class="${c.name}">${c.name}</button>`;
+        classList.appendChild(li);
+      });
+      // Add event listeners for class buttons
+      Array.from(classList.querySelectorAll("button[data-class]"))
+        .forEach(btn => btn.onclick = () => openClass(btn.dataset.class));
+    }
 
-
+    // Open Class
     function openClass(c) {
       currentClass = c;
-      document.getElementById("main").classList.add("hidden");
-      document.getElementById("classPage").classList.remove("hidden");
-      document.getElementById("classTitle").innerText = c;
+      showSection("classPage");
+      updateNav();
+      classTitle.textContent = c;
+      resetAttendance();
+      // Load previous attendance if exists
+      if (attendanceSaved[c]) {
+        students = attendanceSaved[c];
+        showAttendanceSummary();
+      } else {
+        attendanceArea.innerHTML = `<div class='text-gray-500'>Upload an Excel file to start attendance.</div>`;
+      }
     }
 
-    function loadExcel() {
-      let file = document.getElementById("excelInput").files[0];
-      if (!file) return alert("Upload a file");
-      let reader = new FileReader();
+    // Delete Class
+    deleteClassBtn.onclick = function() {
+      if (confirm(`Delete class '${currentClass}'? This cannot be undone.`)) {
+        classes = classes.filter(cls => cls.name !== currentClass);
+        delete attendanceSaved[currentClass];
+        saveState();
+        showSection("main");
+        updateNav();
+        renderClasses();
+        showMessage("Class deleted.");
+      }
+    };
+
+    // Upload Excel
+    uploadExcelBtn.onclick = function() {
+      const file = document.getElementById("excelInput").files[0];
+      if (!file) return showMessage("Upload a file", "error");
+      attendanceArea.innerHTML = `<div class='text-center text-gray-500'>Processing...</div>`;
+      const reader = new FileReader();
       reader.onload = function(e) {
-        let data = new Uint8Array(e.target.result);
-        let workbook = XLSX.read(data, {type: "array"});
-        let sheet = workbook.Sheets[workbook.SheetNames[0]];
-        let raw = XLSX.utils.sheet_to_json(sheet);
-
-        // Normalize keys
-        students = raw.map(row => ({
-          Name: row["Name"] || row["name"] || "",
-          Enrollment: row["Enrollment"] || row["enrollment"] || "",
-          Registration: row["Registration"] || row["registration"] || "",
-          Status: ""
-        }));
-
-        startAttendance();
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, {type: "array"});
+          const sheet = workbook.Sheets[workbook.SheetNames[0]];
+          const raw = XLSX.utils.sheet_to_json(sheet);
+          if (!raw.length) throw new Error("No data found in Excel.");
+          // Dynamically get all columns
+          const allKeys = Object.keys(raw[0]);
+          // Normalize keys for display
+          students = raw.map(row => {
+            let student = {};
+            allKeys.forEach(key => {
+              student[key] = row[key] || "";
+            });
+            // Always add Status field
+            student.Status = "";
+            return student;
+          });
+          window.allStudentKeys = allKeys; // Save for later use
+          startAttendance();
+        } catch (err) {
+          showMessage("Error processing file: " + err.message, "error");
+          attendanceArea.innerHTML = "";
+        }
       };
       reader.readAsArrayBuffer(file);
-    }
+    };
 
+    // Attendance Flow
     function startAttendance() {
       index = 0;
       showStudent();
     }
-
     function showStudent() {
-      let area = document.getElementById("attendanceArea");
       if (index >= students.length) {
-        area.innerHTML = `
-          <p class='text-green-600 font-bold mb-2'>Attendance Completed!</p>
-          <button onclick="downloadAttendance()" class="bg-blue-600 text-white px-4 py-2 rounded">Download Attendance</button>
-        `;
+        attendanceSaved[currentClass] = students;
+        saveState();
+        showAttendanceSummary();
         return;
       }
-      let s = students[index];
-      area.innerHTML = `
+      const s = students[index];
+      // Show all columns except Status
+      let details = window.allStudentKeys.map(key => `<p><b>${key}:</b> ${s[key]}</p>`).join("");
+      attendanceArea.innerHTML = `
         <div class="p-4 border rounded shadow">
-          <p><b>Name:</b> ${s.Name}</p>
-          <p><b>Enrollment:</b> ${s.Enrollment}</p>
-          <p><b>Registration:</b> ${s.Registration}</p>
+          ${details}
           <div class="mt-2 flex gap-2">
-            <button onclick="markPresent()" class="bg-green-500 text-white px-4 py-2 rounded">Present</button>
-            <button onclick="markAbsent()" class="bg-red-500 text-white px-4 py-2 rounded">Absent</button>
+            <button id="presentBtn" class="bg-green-500 text-white px-4 py-2 rounded">Present</button>
+            <button id="absentBtn" class="bg-red-500 text-white px-4 py-2 rounded">Absent</button>
           </div>
         </div>
+        <div class="mt-2 text-center text-gray-500">${index + 1} / ${students.length}</div>
       `;
+      document.getElementById("presentBtn").onclick = () => { students[index].Status = "Present"; index++; showStudent(); };
+      document.getElementById("absentBtn").onclick = () => { students[index].Status = "Absent"; index++; showStudent(); };
     }
 
-    function markPresent() {
-      students[index].Status = "Present";
-      index++;
-      showStudent();
+    // Attendance Summary & Edit
+    function showAttendanceSummary() {
+      let presentCount = students.filter(s => s.Status === "Present").length;
+      let absentCount = students.filter(s => s.Status === "Absent").length;
+      // Table headers: all columns + Status + Edit
+      let headers = (window.allStudentKeys || ["Name","Enrollment","Registration"]).concat(["Status","Edit"]);
+      attendanceArea.innerHTML = `
+        <p class='text-green-600 font-bold mb-2'>Attendance Completed!</p>
+        <div class="mb-2">Present: <span class="text-green-700 font-bold">${presentCount}</span> | Absent: <span class="text-red-700 font-bold">${absentCount}</span></div>
+        <table class="w-full text-sm mb-2 border">
+          <thead><tr class="bg-gray-200">
+            ${headers.map(h => `<th>${h}</th>`).join("")}
+          </tr></thead>
+          <tbody>
+            ${students.map((s, i) => `
+              <tr>
+                ${headers.slice(0,-2).map(key => `<td>${s[key] || ""}</td>`).join("")}
+                <td class="${s.Status === "Present" ? "text-green-600" : "text-red-600"}">${s.Status}</td>
+                <td>
+                  <select data-edit="${i}" class="border rounded px-1">
+                    <option value="Present" ${s.Status === "Present" ? "selected" : ""}>Present</option>
+                    <option value="Absent" ${s.Status === "Absent" ? "selected" : ""}>Absent</option>
+                  </select>
+                </td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+        <button id="downloadBtn" class="bg-blue-600 text-white px-4 py-2 rounded">Download Attendance</button>
+      `;
+      // Edit attendance
+      Array.from(attendanceArea.querySelectorAll("select[data-edit]"))
+        .forEach(sel => sel.onchange = function() {
+          students[parseInt(sel.dataset.edit)].Status = sel.value;
+          attendanceSaved[currentClass] = students;
+          saveState();
+          showAttendanceSummary();
+        });
+      document.getElementById("downloadBtn").onclick = downloadAttendance;
     }
 
-    function markAbsent() {
-      students[index].Status = "Absent";
-      index++;
-      showStudent();
-    }
-
+    // Download Attendance
     function downloadAttendance() {
-      let today = new Date().toLocaleDateString();
+      const today = new Date().toLocaleDateString();
+      // Use all columns for export
+      let keys = (window.allStudentKeys || ["Name","Enrollment","Registration"]);
       let wsData = [
-        ["Teacher", teacher],
+        ["Teacher", teacher ? teacher.name : ""],
         ["Class", currentClass],
         ["Date", today],
         [],
-        ["Name", "Enrollment", "Registration", "Status"]
+        [...keys, "Status"]
       ];
       students.forEach(s => {
-        wsData.push([s.Name, s.Enrollment, s.Registration, s.Status]);
+        wsData.push(keys.map(k => s[k] || "").concat([s.Status]));
       });
-      let ws = XLSX.utils.aoa_to_sheet(wsData);
-      let wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Attendance");
       XLSX.writeFile(wb, `${currentClass}_attendance_${today}.xlsx`);
+      showMessage("Attendance downloaded!");
     }
+
+    // Initial Load
+    function init() {
+      loadState();
+      if (teacher) {
+        showSection("main");
+        updateNav();
+        teacherDisplay.textContent = teacher.name;
+        renderClasses();
+      } else {
+        showSection("registration");
+        updateNav();
+      }
+    }
+    init();
   </script>
 </body>
 </html>
